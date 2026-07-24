@@ -2,199 +2,96 @@
 <html lang="ko">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>실시간 3단 차익 스캐너</title>
+    <title>빗썸 출발 전체 코인 실시간 차익 스캐너</title>
     <style>
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-            background-color: #121212;
-            color: #ffffff;
-            margin: 0;
-            padding: 20px;
-        }
-        h1 {
-            text-align: center;
-            color: #f39c12;
-            margin-bottom: 8px;
-        }
-        #status {
-            text-align: center;
-            font-size: 14px;
-            color: #aaa;
-            margin-bottom: 25px;
-        }
-        .grid-container {
-            display: grid;
-            grid-template-columns: repeat(3, 1fr);
-            gap: 15px;
-        }
-        @media (max-width: 1024px) {
-            .grid-container { grid-template-columns: 1fr; }
-        }
-        .card {
-            background-color: #1e1e1e;
-            border-radius: 8px;
-            padding: 15px;
-            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.3);
-            border: 1px solid #333;
-            max-height: 80vh;
-            display: flex;
-            flex-direction: column;
-        }
-        .card-header {
-            font-size: 17px;
-            font-weight: bold;
-            padding-bottom: 10px;
-            margin-bottom: 10px;
-            border-bottom: 2px solid #333;
-            display: flex;
-            justify-content: space-between;
-        }
-        .col-1 .card-header { color: #3498db; border-color: #3498db; }
-        .col-2 .card-header { color: #e74c3c; border-color: #e74c3c; }
-        .col-3 .card-header { color: #2ecc71; border-color: #2ecc71; }
-        
-        .table-container {
-            overflow-y: auto;
-            flex-grow: 1;
-        }
-        table {
-            width: 100%;
-            border-collapse: collapse;
-            font-size: 13px;
-        }
-        th, td {
-            padding: 8px 4px;
-            text-align: center;
-            border-bottom: 1px solid #2a2a2a;
-        }
-        th { 
-            background-color: #252525; 
-            color: #ccc; 
-            position: sticky; 
-            top: 0; 
-            z-index: 1;
-        }
-        
-        /* 기본 수익률 스타일 (1.0% 이상 1.5% 미만: 녹색) */
-        .profit-normal {
-            color: #2ecc71;
-            font-weight: bold;
-        }
-        /* Highlight 스타일 (1.5% 이상: 주황색 + 강렬함) */
-        .profit-high {
-            color: #ff9f43;
-            font-weight: 800;
-            font-size: 14px;
-        }
+        body { background-color: #121212; color: #ffffff; font-family: 'Pretendard', sans-serif; margin: 0; padding: 20px; }
+        .header { text-align: center; margin-bottom: 20px; }
+        .header h1 { color: #f39c12; margin: 0 0 8px 0; font-size: 1.8rem; }
+        .sub-info { color: #888; font-size: 0.85rem; }
+        .grid-container { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+        .card { background-color: #1a1a1a; border-radius: 10px; padding: 15px; border: 1px solid #2d2d2d; }
+        .card-header { font-size: 1.05rem; font-weight: bold; padding-bottom: 10px; border-bottom: 1px solid #333; display: flex; justify-content: space-between; margin-bottom: 10px; }
+        .high-title { color: #ff9f43; }
+        .normal-title { color: #2ecc71; }
+        .table-container { max-height: 78vh; overflow-y: auto; }
+        table { width: 100%; border-collapse: collapse; text-align: left; font-size: 0.85rem; }
+        th { position: sticky; top: 0; background-color: #222; padding: 8px; color: #aaa; font-weight: normal; font-size: 0.8rem; }
+        td { padding: 8px; border-bottom: 1px solid #262626; }
+        .badge { padding: 2px 5px; border-radius: 3px; font-size: 0.72rem; font-weight: bold; background-color: #2b3a4a; color: #70a1ff; }
+        .profit-high { color: #ff9f43; font-weight: bold; font-size: 0.95rem; }
+        .profit-normal { color: #2ecc71; font-weight: bold; font-size: 0.95rem; }
     </style>
 </head>
 <body>
 
-    <h1>🚀 실시간 종합 차익 스캐너</h1>
-    <div id="status">🔄 서버 연결 시도 중...</div>
+    <div class="header">
+        <h1>🚀 빗썸 출발 전체 코인 차익 스캐너</h1>
+        <div class="sub-info">기준 USDT 가격 (빗썸): <span id="usdt-rate" style="color:#f1c40f; font-weight:bold;">-</span> KRW | 필터: 빗썸 출금 가능 & 1.0% 이상</div>
+    </div>
 
     <div class="grid-container">
-        <!-- 1번 칸: 해외 <-> 해외 -->
-        <div class="card col-1">
-            <div class="card-header">
-                <span>🌐 해외 ↔ 해외</span>
-                <span id="cnt-global" style="font-size:12px; color:#888;">0개</span>
+        <!-- 1. 고수익 구간 (1.5% 이상) -->
+        <div class="card">
+            <div class="card-header high-title">
+                <span>🔥 고수익 구간 (1.5% 이상)</span>
+                <span id="high-count">0개</span>
             </div>
             <div class="table-container">
                 <table>
                     <thead>
-                        <tr><th>코인</th><th>매수처</th><th>매도처</th><th>수익률</th></tr>
+                        <tr><th>코인</th><th>빗썸 (매수 1호가)</th><th>최고가 매도처</th><th>기대 수익률</th></tr>
                     </thead>
-                    <tbody id="table-global"><tr><td colspan="4">대기 중...</td></tr></tbody>
+                    <tbody id="high-list"></tbody>
                 </table>
             </div>
         </div>
 
-        <!-- 2번 칸: 국내 <- 해외 -->
-        <div class="card col-2">
-            <div class="card-header">
-                <span>📥 국내 💡 해외</span>
-                <span id="cnt-inbound" style="font-size:12px; color:#888;">0개</span>
+        <!-- 2. 일반 구간 (1.0% ~ 1.5% 미만) -->
+        <div class="card">
+            <div class="card-header normal-title">
+                <span>⚡ 일반 구간 (1.0% ~ 1.5% 미만)</span>
+                <span id="normal-count">0개</span>
             </div>
             <div class="table-container">
                 <table>
                     <thead>
-                        <tr><th>코인</th><th>해외 매수</th><th>국내 매도</th><th>수익률</th></tr>
+                        <tr><th>코인</th><th>빗썸 (매수 1호가)</th><th>최고가 매도처</th><th>기대 수익률</th></tr>
                     </thead>
-                    <tbody id="table-inbound"><tr><td colspan="4">대기 중...</td></tr></tbody>
-                </table>
-            </div>
-        </div>
-
-        <!-- 3번 칸: 빗썸 -> 해외 -->
-        <div class="card col-3">
-            <div class="card-header">
-                <span>📤 빗썸 ➔ 해외</span>
-                <span id="cnt-bithumb" style="font-size:12px; color:#888;">0개</span>
-            </div>
-            <div class="table-container">
-                <table>
-                    <thead>
-                        <tr><th>코인</th><th>빗썸 매수</th><th>해외 매도</th><th>수익률</th></tr>
-                    </thead>
-                    <tbody id="table-bithumb"><tr><td colspan="4">대기 중...</td></tr></tbody>
+                    <tbody id="normal-list"></tbody>
                 </table>
             </div>
         </div>
     </div>
 
     <script>
-        const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-        const host = window.location.host || '127.0.0.1:8000';
-        const socket = new WebSocket(`${protocol}//${host}/ws`);
+        const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+        const socket = new WebSocket(`${wsProtocol}//${window.location.host}/ws`);
 
-        socket.onopen = function() {
-            document.getElementById('status').innerText = '🟢 실시간 데이터 수신 중';
-            document.getElementById('status').style.color = '#2ecc71';
-        };
-
-        socket.onmessage = function(event) {
-            try {
-                const data = JSON.parse(event.data);
-                if (data.global) updateTable('table-global', 'cnt-global', data.global);
-                if (data.inbound) updateTable('table-inbound', 'cnt-inbound', data.inbound);
-                if (data.bithumb) updateTable('table-bithumb', 'cnt-bithumb', data.bithumb);
-            } catch (e) {
-                console.error("데이터 파싱 에러:", e);
-            }
-        };
-
-        socket.onclose = function() {
-            document.getElementById('status').innerText = '🔴 연결 끊김 (페이지를 새로고침 하세요)';
-            document.getElementById('status').style.color = '#e74c3c';
-        };
-
-        function updateTable(tableId, countId, items) {
-            const tbody = document.getElementById(tableId);
-            document.getElementById(countId).innerText = items.length + '개';
+        function renderRows(list, targetId, countId, isHigh) {
+            const tbody = document.getElementById(targetId);
+            document.getElementById(countId).innerText = `${list.length}개`;
             
-            if (items.length === 0) {
-                tbody.innerHTML = '<tr><td colspan="4">조건(1% 이상)에 맞는 코인이 없습니다.</td></tr>';
+            if (list.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="4" style="text-align:center; color:#555;">해당 구간 코인 없음</td></tr>';
                 return;
             }
 
-            let html = '';
-            items.forEach(item => {
-                // 1.5% 이상은 주황색(profit-high), 그 미만은 녹색(profit-normal)
-                const profitClass = item.profit >= 1.5 ? 'profit-high' : 'profit-normal';
-                
-                html += `
-                    <tr>
-                        <td><b>${item.symbol}</b></td>
-                        <td>${item.buy_ex}<br><small style="color:#aaa">${item.buy_price}</small></td>
-                        <td>${item.sell_ex}<br><small style="color:#aaa">${item.sell_price}</small></td>
-                        <td class="${profitClass}">+${item.profit.toFixed(2)}%</td>
-                    </tr>
-                `;
-            });
-            tbody.innerHTML = html;
+            tbody.innerHTML = list.map(item => `
+                <tr>
+                    <td><strong>${item.symbol}</strong></td>
+                    <td>${item.bithumb_price}</td>
+                    <td><span class="badge">${item.sell_ex}</span><br><small style="color:#aaa;">${item.sell_price}</small></td>
+                    <td class="${isHigh ? 'profit-high' : 'profit-normal'}">+${item.profit}%</td>
+                </tr>
+            `).join('');
         }
+
+        socket.onmessage = function(event) {
+            const data = JSON.parse(event.data);
+            document.getElementById('usdt-rate').innerText = `${data.usdt_krw}`;
+            renderRows(data.high, 'high-list', 'high-count', true);
+            renderRows(data.normal, 'normal-list', 'normal-count', false);
+        };
     </script>
 </body>
 </html>
