@@ -12,31 +12,32 @@
         .status-online { background-color: #2ecc71; color: #000; }
         .status-offline { background-color: #e74c3c; color: #fff; }
         
-        /* 다중 그리드 레이아웃 (거래소별 칸 나누기) */
-        .grid-container { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 15px; }
+        .grid-container { display: grid; grid-template-columns: repeat(2, 1fr); gap: 15px; max-width: 1200px; margin: 0 auto; }
         .card { background-color: #1a1a1a; border-radius: 10px; padding: 12px; border: 1px solid #2d2d2d; }
-        .card-header { font-size: 1rem; font-weight: bold; padding-bottom: 8px; border-bottom: 1px solid #333; display: flex; justify-content: space-between; margin-bottom: 8px; color: #3498db; }
-        .table-container { max-height: 38vh; overflow-y: auto; }
-        table { width: 100%; border-collapse: collapse; text-align: left; font-size: 0.8rem; }
+        .card-header { font-size: 1.05rem; font-weight: bold; padding-bottom: 8px; border-bottom: 1px solid #333; display: flex; justify-content: space-between; margin-bottom: 8px; color: #3498db; }
+        .table-container { max-height: 40vh; overflow-y: auto; }
+        table { width: 100%; border-collapse: collapse; text-align: left; font-size: 0.85rem; }
         th { position: sticky; top: 0; background-color: #222; padding: 6px; color: #aaa; font-weight: normal; }
         td { padding: 6px; border-bottom: 1px solid #262626; }
-        .profit-pos { color: #2ecc71; font-weight: bold; }
+        
+        .profit-high { color: #ff9f43; font-weight: bold; font-size: 0.95rem; }
+        .profit-normal { color: #2ecc71; font-weight: bold; font-size: 0.95rem; }
     </style>
 </head>
 <body>
 
     <div class="header">
-        <h1>🚀 거래소별 빗썸 출발 차익 스캐너 <span id="conn-status" class="status-badge status-offline">연결 중...</span></h1>
+        <h1>🚀 빗썸 출발 차익 스캐너 <span id="conn-status" class="status-badge status-offline">연결 중...</span></h1>
         <div class="sub-info">기준 USDT 가격 (빗썸): <span id="usdt-rate" style="color:#f1c40f; font-weight:bold;">-</span> KRW | 필터: 빗썸 출금 가능 & 1.0% 이상</div>
     </div>
 
     <div class="grid-container" id="exchange-grid">
-        <!-- 동적으로 거래소별 카드가 생성됩니다 -->
+        <!-- 4개 거래소만 동적으로 생성 -->
     </div>
 
     <script>
         let socket;
-        const exchanges = ['바이낸스', 'OKX', '바이비트', '비트겟', '게이트아이오', '업비트'];
+        const exchanges = ['바이낸스', '바이비트', '비트겟', '업비트'];
 
         function initGrid() {
             const grid = document.getElementById('exchange-grid');
@@ -74,11 +75,9 @@
                 const data = JSON.parse(event.data);
                 document.getElementById('usdt-rate').innerText = data.usdt_krw;
 
-                // 거래소별 데이터 분류
                 let grouped = {};
                 exchanges.forEach(ex => grouped[ex] = []);
 
-                // 서버에서 온 데이터(high + normal 통합)를 거래소별로 분류
                 const allItems = [...(data.high || []), ...(data.normal || [])];
                 allItems.forEach(item => {
                     if (grouped[item.sell_ex]) {
@@ -86,7 +85,6 @@
                     }
                 });
 
-                // 각 카드별 렌더링
                 exchanges.forEach(ex => {
                     renderRows(grouped[ex], `list-${ex}`, `count-${ex}`);
                 });
@@ -108,17 +106,20 @@
                 return;
             }
 
-            // 수익률 높은 순으로 정렬
             list.sort((a, b) => b.profit - a.profit);
 
-            tbody.innerHTML = list.map(item => `
-                <tr>
-                    <td><strong>${item.symbol}</strong></td>
-                    <td>${item.bithumb_price}</td>
-                    <td>${item.sell_price}</td>
-                    <td class="profit-pos">+${item.profit}%</td>
-                </tr>
-            `).join('');
+            tbody.innerHTML = list.map(item => {
+                const isHigh = item.profit >= 1.5;
+                const profitClass = isHigh ? 'profit-high' : 'profit-normal';
+                return `
+                    <tr>
+                        <td><strong>${item.symbol}</strong></td>
+                        <td>${item.bithumb_price}</td>
+                        <td>${item.sell_price}</td>
+                        <td class="${profitClass}">+${item.profit}%</td>
+                    </tr>
+                `;
+            }).join('');
         }
 
         initGrid();
