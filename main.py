@@ -13,17 +13,17 @@ async def get():
 
 async def fetch_bithumb_arbitrage():
     headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-        "Accept": "application/json"
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+        "Accept": "application/json, text/plain, */*",
+        "Accept-Language": "ko-KR,ko;q=0.9,en-US;q=0.8,en;q=0.7",
+        "Referer": "https://www.binance.com/"
     }
 
     async with httpx.AsyncClient(timeout=10.0, headers=headers, follow_redirects=True) as client:
         tasks = [
             client.get("https://api.binance.com/api/v3/ticker/price"),
-            client.get("https://www.okx.com/api/v5/market/tickers?instType=SPOT"),
             client.get("https://api.bybit.com/v5/market/tickers?category=spot"),
             client.get("https://api.bitget.com/api/v2/spot/market/tickers"),
-            client.get("https://api.gateio.ws/api/v4/spot/tickers"),
             client.get("https://api.bithumb.com/public/ticker/ALL_KRW"),
             client.get("https://api.upbit.com/v1/ticker/all?quote_currencies=KRW"),
             client.get("https://api.bithumb.com/public/assets_status/ALL")
@@ -32,27 +32,37 @@ async def fetch_bithumb_arbitrage():
         results = await asyncio.gather(*tasks, return_exceptions=True)
         
         foreign_prices = {}
+        
+        # 1. 바이낸스
         if not isinstance(results[0], Exception) and results[0].status_code == 200:
-            foreign_prices['바이낸스'] = {i['symbol'].replace('USDT', '').upper(): float(i['price']) for i in results[0].json() if i['symbol'].endswith('USDT') and float(i['price']) > 0.0001}
+            try:
+                b_data = results[0].json()
+                if isinstance(b_data, list):
+                    foreign_prices['바이낸스'] = {i['symbol'].replace('USDT', '').upper(): float(i['price']) for i in b_data if i['symbol'].endswith('USDT') and float(i['price']) > 0.0001}
+            except Exception:
+                pass
 
+        # 2. 바이비트
         if not isinstance(results[1], Exception) and results[1].status_code == 200:
-            foreign_prices['OKX'] = {i['instId'].replace('-USDT', '').upper(): float(i['last']) for i in results[1].json().get('data', []) if i['instId'].endswith('-USDT') and float(i['last']) > 0.0001}
+            try:
+                bybit_list = results[1].json().get('result', {}).get('list', [])
+                foreign_prices['바이비트'] = {i['symbol'].replace('USDT', '').upper(): float(i['lastPrice']) for i in bybit_list if i['symbol'].endswith('USDT') and float(i['lastPrice']) > 0.0001}
+            except Exception:
+                pass
 
+        # 3. 비트겟
         if not isinstance(results[2], Exception) and results[2].status_code == 200:
-            foreign_prices['바이비트'] = {i['symbol'].replace('USDT', '').upper(): float(i['lastPrice']) for i in results[2].json().get('result', {}).get('list', []) if i['symbol'].endswith('USDT') and float(i['lastPrice']) > 0.0001}
+            try:
+                foreign_prices['비트겟'] = {i['symbol'].replace('USDT', '').upper(): float(i['lastPr']) for i in results[2].json().get('data', []) if i.get('symbol', '').endswith('USDT') and float(i.get('lastPr', 0)) > 0.0001}
+            except Exception:
+                pass
 
-        if not isinstance(results[3], Exception) and results[3].status_code == 200:
-            foreign_prices['비트겟'] = {i['symbol'].replace('USDT', '').upper(): float(i['lastPr']) for i in results[3].json().get('data', []) if i.get('symbol', '').endswith('USDT') and float(i.get('lastPr', 0)) > 0.0001}
-
-        if not isinstance(results[4], Exception) and results[4].status_code == 200:
-            foreign_prices['게이트아이오'] = {i['currency_pair'].replace('_USDT', '').upper(): float(i['last']) for i in results[4].json() if i.get('currency_pair', '').endswith('_USDT') and float(i.get('last', 0)) > 0.0001}
-
+        # 4. 빗썸
         bithumb_prices = {}
         usd_krw = 1462.0
-        
-        if not isinstance(results[5], Exception) and results[5].status_code == 200:
+        if not isinstance(results[3], Exception) and results[3].status_code == 200:
             try:
-                b_data = results[5].json().get('data', {})
+                b_data = results[3].json().get('data', {})
                 for sym, val in b_data.items():
                     if sym != 'date' and isinstance(val, dict):
                         p = float(val.get('closing_price', 0))
@@ -63,17 +73,19 @@ async def fetch_bithumb_arbitrage():
             except Exception:
                 pass
 
+        # 5. 업비트
         upbit_prices = {}
-        if not isinstance(results[6], Exception) and results[6].status_code == 200:
+        if not isinstance(results[4], Exception) and results[4].status_code == 200:
             try:
-                upbit_prices = {i['market'].replace('KRW-', '').upper(): float(i['trade_price']) for i in results[6].json() if float(i['trade_price']) > 0.1}
+                upbit_prices = {i['market'].replace('KRW-', '').upper(): float(i['trade_price']) for i in results[4].json() if float(i['trade_price']) > 0.1}
             except Exception:
                 pass
 
+        # 6. 빗썸 출금 상태
         bithumb_withdraw_block = set()
-        if not isinstance(results[7], Exception) and results[7].status_code == 200:
+        if not isinstance(results[5], Exception) and results[5].status_code == 200:
             try:
-                bs_data = results[7].json().get('data', {})
+                bs_data = results[5].json().get('data', {})
                 for sym, status in bs_data.items():
                     if isinstance(status, dict):
                         if str(status.get('withdrawal_status', '1')) == '0':
