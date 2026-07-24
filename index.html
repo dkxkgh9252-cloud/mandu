@@ -3,28 +3,22 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>빗썸 출발 전체 코인 실시간 차익 스캐너</title>
+    <title>실시간 차익 스캐너</title>
     <style>
         body { font-family: sans-serif; background-color: #121212; color: #ffffff; padding: 20px; }
-        h1 { color: #f39c12; }
-        table { width: 100%; border-collapse: collapse; margin-top: 20px; }
-        th, td { border: 1px solid #333; padding: 8px; text-align: center; }
-        th { background-color: #1f1f1f; color: #f39c12; }
-        tr:nth-child(even) { background-color: #1a1a1a; }
-        .positive { color: #2ecc71; font-weight: bold; }
+        #status { text-align: center; color: #f39c12; margin-bottom: 20px; font-weight: bold; }
+        #content { width: 100%; }
     </style>
 </head>
 <body>
-    <h1>🚀 빗썸 출발 전체 코인 실시간 차익 스캐너</h1>
-    <div id="status">서버에 연결 중...</div>
+    <div id="status">🔄 서버 연결 중... (첫 접속 시 1분 정도 걸릴 수 있습니다)</div>
     <div id="content"></div>
 
     <script>
-        // Render 서버의 WebSocket 주소로 연결합니다.
         const socket = new WebSocket('wss://mandu.onrender.com/ws');
 
         socket.onopen = function() {
-            document.getElementById('status').innerText = '🟢 실시간 데이터 수신 중...';
+            document.getElementById('status').innerText = '🟢 실시간 데이터 수신 중';
         };
 
         socket.onmessage = function(event) {
@@ -32,7 +26,7 @@
         };
 
         socket.onclose = function() {
-            document.getElementById('status').innerText = '🔴 연결이 끊어졌습니다. 재연결 시도 중...';
+            document.getElementById('status').innerText = '🔴 연결이 끊어졌습니다. 잠시 후 새로고침 해주세요.';
         };
 
         socket.onerror = function(error) {
