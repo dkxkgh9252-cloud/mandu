@@ -12,7 +12,12 @@ async def get():
     return HTMLResponse(content=html_content)
 
 async def fetch_bithumb_arbitrage():
-    async with httpx.AsyncClient(timeout=8.0) as client:
+    # Render 환경 호환을 위한 Header 설정
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+    }
+
+    async with httpx.AsyncClient(timeout=10.0, headers=headers) as client:
         tasks = [
             client.get("https://api.binance.com/api/v3/ticker/price"),
             client.get("https://www.okx.com/api/v5/market/tickers?instType=SPOT"),
@@ -45,7 +50,7 @@ async def fetch_bithumb_arbitrage():
 
         # 2. 빗썸/업비트 시세 파싱
         bithumb_prices = {}
-        usd_krw = 1462.0  # 기본 USDT 기준 환율
+        usd_krw = 1462.0  # 기본 USDT 환율
         if not isinstance(results[5], Exception) and results[5].status_code == 200:
             b_data = results[5].json().get('data', {})
             for sym, val in b_data.items():
@@ -60,17 +65,19 @@ async def fetch_bithumb_arbitrage():
         if not isinstance(results[6], Exception) and results[6].status_code == 200:
             upbit_prices = {i['market'].replace('KRW-', '').upper(): float(i['trade_price']) for i in results[6].json() if float(i['trade_price']) > 0.1}
 
-        # 3. 빗썸 출금 상태 확인
-        bithumb_withdraw_ok = set()
+        # 3. 빗썸 출금 상태 파싱 (안전 필터링)
+        bithumb_withdraw_block = set()
         if not isinstance(results[7], Exception) and results[7].status_code == 200:
             bs_data = results[7].json().get('data', {})
             for sym, status in bs_data.items():
                 if isinstance(status, dict):
-                    if str(status.get('withdrawal_status', '0')) == '1':
-                        bithumb_withdraw_ok.add(sym.upper())
+                    # 출금 중단 상태인 것만 명확히 감지해서 차단 목록에 넣음
+                    w_status = str(status.get('withdrawal_status', '1'))
+                    if w_status == '0':
+                        bithumb_withdraw_block.add(sym.upper())
 
-        high_profit = [] # 1.5% 이상
-        normal_profit = [] # 1.0% ~ 1.5% 미만
+        high_profit = []
+        normal_profit = []
 
         def format_krw(price):
             if price < 1: return f"{price:.5f}원"
@@ -78,9 +85,10 @@ async def fetch_bithumb_arbitrage():
             if price < 100: return f"{price:.2f}원"
             return f"{price:,.0f}원"
 
-        # 4. 차익 계산 (빗썸 매수 기준)
+        # 4. 차익 계산 (빗썸 출발)
         for sym, b_price in bithumb_prices.items():
-            if sym == 'USDT' or sym not in bithumb_withdraw_ok:
+            # USDT 제외 및 '확실히 출금이 막힌 코인'만 제외
+            if sym == 'USDT' or sym in bithumb_withdraw_block:
                 continue
 
             best_sell_ex = ""
@@ -106,7 +114,7 @@ async def fetch_bithumb_arbitrage():
                         best_sell_ex = f_name
                         best_sell_price_krw = f_price_krw
 
-            # 1.0% ~ 30% 사이 조건
+            # 1.0% ~ 30% 조건
             if 1.0 <= best_profit <= 30.0:
                 item = {
                     "symbol": sym,
