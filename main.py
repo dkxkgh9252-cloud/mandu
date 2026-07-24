@@ -1,331 +1,141 @@
 import asyncio
-import json
 import httpx
-from fastapi import FastAPI, WebSocket
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.responses import HTMLResponse
 
 app = FastAPI()
 
-HTML_LAYOUT = """
-<!DOCTYPE html>
-<html lang="ko">
-<head>
-    <meta charset="UTF-8">
-    <title>빗썸 출발 전체 코인 실시간 차익 스캐너 (2단 그리드 & 1.5% 강조)</title>
-    <style>
-        body { background-color: #121212; color: #fff; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; margin: 0; padding: 20px; }
-        h1 { text-align: center; color: #ff9800; margin-bottom: 5px; }
-        .subtitle { text-align: center; color: #888; font-size: 0.9rem; margin-bottom: 20px; }
-        .container { max-width: 1400px; margin: 0 auto; }
-        
-        /* 2단 분할 레이아웃 */
-        .grid-container {
-            display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 20px;
-        }
-
-        .column-card {
-            background: #1e1e1e;
-            border-radius: 8px;
-            padding: 15px;
-            box-shadow: 0 4px 20px rgba(0,0,0,0.5);
-            border: 1px solid #2d2d2d;
-        }
-
-        .column-title {
-            font-size: 1.1rem;
-            font-weight: bold;
-            margin-bottom: 12px;
-            padding-bottom: 8px;
-            border-bottom: 2px solid #333;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-        }
-
-        .high-title { color: #ff9800; border-bottom-color: #ff9800; }
-        .mid-title { color: #00e676; border-bottom-color: #00e676; }
-
-        table { width: 100%; border-collapse: collapse; margin-top: 5px; }
-        th, td { padding: 10px 12px; text-align: center; border-bottom: 1px solid #2d2d2d; }
-        th { background-color: #252525; color: #aaa; font-weight: 600; font-size: 0.8rem; position: sticky; top: 0; }
-        tr:hover { background-color: #2a2a2a; }
-
-        .symbol { font-weight: bold; font-size: 1rem; color: #fff; }
-        .badge { padding: 3px 6px; border-radius: 4px; font-size: 0.75rem; font-weight: bold; }
-        .buy-bg { background-color: rgba(255, 152, 0, 0.15); color: #ff9800; border: 1px solid #ff9800; }
-        .sell-bg { background-color: rgba(33, 150, 243, 0.15); color: #2196f3; border: 1px solid #2196f3; }
-        
-        .rate { font-size: 1rem; font-weight: bold; }
-        .plus-green { color: #00e676; }
-        
-        /* 1.5% 이상 주황색 스타일 하이라이트 */
-        .highlight-orange {
-            background-color: rgba(255, 152, 0, 0.08);
-        }
-        .highlight-orange .symbol { color: #ffb74d; }
-        .rate-orange { color: #ff9800 !important; font-size: 1.1rem; font-weight: 800; }
-
-        @media (max-width: 900px) {
-            .grid-container { grid-template-columns: 1fr; }
-        }
-    </style>
-</head>
-<body>
-
-<div class="container">
-    <h1>🚀 빗썸 출발 전체 코인 차익 스캐너</h1>
-    <div class="subtitle">기준 USDT 가격 (빗썸): <span id="usdt-rate" style="color:#ff9800; font-weight:bold;">-</span> KRW | 필터: <strong>빗썸 출금 가능 & 1.0% 이상</strong></div>
-
-    <div class="grid-container">
-        <!-- 1.5% 이상 (좌측 주황색 강조) -->
-        <div class="column-card">
-            <div class="column-title high-title">
-                <span>🔥 고수익 구간 (1.5% 이상)</span>
-                <span id="high-count" style="font-size:0.9rem;">0개</span>
-            </div>
-            <table>
-                <thead>
-                    <tr>
-                        <th>코인</th>
-                        <th>빗썸 (매수 1호가)</th>
-                        <th>최고가 매도처</th>
-                        <th>기대 수익률</th>
-                    </tr>
-                </thead>
-                <tbody id="list-high">
-                    <tr><td colspan="4" style="text-align:center; padding: 30px; color: #888;">탐색 중...</td></tr>
-                </tbody>
-            </table>
-        </div>
-
-        <!-- 1.0% ~ 1.5% 미만 (우측) -->
-        <div class="column-card">
-            <div class="column-title mid-title">
-                <span>⚡ 일반 구간 (1.0% ~ 1.5% 미만)</span>
-                <span id="mid-count" style="font-size:0.9rem;">0개</span>
-            </div>
-            <table>
-                <thead>
-                    <tr>
-                        <th>코인</th>
-                        <th>빗썸 (매수 1호가)</th>
-                        <th>최고가 매도처</th>
-                        <th>기대 수익률</th>
-                    </tr>
-                </thead>
-                <tbody id="list-mid">
-                    <tr><td colspan="4" style="text-align:center; padding: 30px; color: #888;">탐색 중...</td></tr>
-                </tbody>
-            </table>
-        </div>
-    </div>
-</div>
-
-<script>
-    const ws = new WebSocket(`ws://${location.host}/ws`);
-
-    function formatPrice(price) {
-        if (price < 1) return price.toFixed(5);      
-        if (price < 100) return price.toFixed(2);    
-        return Math.round(price).toLocaleString();  
-    }
-
-    ws.onmessage = (event) => {
-        const data = JSON.parse(event.data);
-        document.getElementById("usdt-rate").innerText = data.usdt_krw.toLocaleString();
-
-        const listHigh = document.getElementById("list-high");
-        const listMid = document.getElementById("list-mid");
-
-        listHigh.innerHTML = "";
-        listMid.innerHTML = "";
-
-        let highCount = 0;
-        let midCount = 0;
-
-        data.opportunities.forEach(item => {
-            const tr = document.createElement("tr");
-
-            if (item.profit_rate >= 1.5) {
-                highCount++;
-                tr.className = "highlight-orange";
-                tr.innerHTML = `
-                    <td class="symbol">${item.symbol}</td>
-                    <td><span style="font-size:0.85rem; color:#ccc;">${formatPrice(item.buy_price)} 원</span></td>
-                    <td>
-                        <span class="badge sell-bg">${item.sell_ex}</span><br>
-                        <span style="font-size:0.85rem; color:#ccc;">${formatPrice(item.sell_price)} 원</span>
-                    </td>
-                    <td class="rate rate-orange">+${item.profit_rate.toFixed(2)}%</td>
-                `;
-                listHigh.appendChild(tr);
-            } else {
-                midCount++;
-                tr.innerHTML = `
-                    <td class="symbol">${item.symbol}</td>
-                    <td><span style="font-size:0.85rem; color:#ccc;">${formatPrice(item.buy_price)} 원</span></td>
-                    <td>
-                        <span class="badge sell-bg">${item.sell_ex}</span><br>
-                        <span style="font-size:0.85rem; color:#ccc;">${formatPrice(item.sell_price)} 원</span>
-                    </td>
-                    <td class="rate plus-green">+${item.profit_rate.toFixed(2)}%</td>
-                `;
-                listMid.appendChild(tr);
-            }
-        });
-
-        document.getElementById("high-count").innerText = highCount + "개";
-        document.getElementById("mid-count").innerText = midCount + "개";
-
-        if (highCount === 0) {
-            listHigh.innerHTML = `<tr><td colspan="4" style="text-align:center; padding: 30px; color: #888;">1.5% 이상 코인이 없습니다.</td></tr>`;
-        }
-        if (midCount === 0) {
-            listMid.innerHTML = `<tr><td colspan="4" style="text-align:center; padding: 30px; color: #888;">1.0% ~ 1.5% 미만 코인이 없습니다.</td></tr>`;
-        }
-    };
-</script>
-
-</body>
-</html>
-"""
-
 @app.get("/")
 async def get():
-    return HTMLResponse(content=HTML_LAYOUT)
+    with open("index.html", "r", encoding="utf-8") as f:
+        html_content = f.read()
+    return HTMLResponse(content=html_content)
 
-async def fetch_prices():
-    async with httpx.AsyncClient(timeout=5.0) as client:
-        bithumb_buy_prices = {}
-        usdt_krw = 1463.0
+async def fetch_bithumb_arbitrage():
+    async with httpx.AsyncClient(timeout=8.0) as client:
+        tasks = [
+            client.get("https://api.binance.com/api/v3/ticker/price"),
+            client.get("https://www.okx.com/api/v5/market/tickers?instType=SPOT"),
+            client.get("https://api.bybit.com/v5/market/tickers?category=spot"),
+            client.get("https://api.bitget.com/api/v2/spot/market/tickers"),
+            client.get("https://api.gateio.ws/api/v4/spot/tickers"),
+            client.get("https://api.bithumb.com/public/ticker/ALL_KRW"),
+            client.get("https://api.upbit.com/v1/ticker/all?quote_currencies=KRW"),
+            client.get("https://api.bithumb.com/public/assets_status/ALL")
+        ]
+        
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+        
+        # 1. 해외 거래소 가격 파싱 ($)
+        foreign_prices = {}
+        if not isinstance(results[0], Exception) and results[0].status_code == 200:
+            foreign_prices['바이낸스'] = {i['symbol'].replace('USDT', '').upper(): float(i['price']) for i in results[0].json() if i['symbol'].endswith('USDT') and float(i['price']) > 0.0001}
 
-        # 1. 빗썸 출금 상태 및 호가창 조회
-        try:
-            status_res = await client.get("https://api.bithumb.com/public/assetsstatus/ALL")
-            status_data = status_res.json().get("data", {})
+        if not isinstance(results[1], Exception) and results[1].status_code == 200:
+            foreign_prices['OKX'] = {i['instId'].replace('-USDT', '').upper(): float(i['last']) for i in results[1].json().get('data', []) if i['instId'].endswith('-USDT') and float(i['last']) > 0.0001}
 
-            res = await client.get("https://api.bithumb.com/public/orderbook/ALL_KRW")
-            bdata = res.json().get("data", {})
-            
-            for coin, info in bdata.items():
-                if coin != "timestamp" and isinstance(info, dict) and "asks" in info and len(info["asks"]) > 0:
-                    coin_status = status_data.get(coin, {})
-                    can_withdraw = coin_status.get("withdrawal_status", 0) == 1
+        if not isinstance(results[2], Exception) and results[2].status_code == 200:
+            foreign_prices['바이비트'] = {i['symbol'].replace('USDT', '').upper(): float(i['lastPrice']) for i in results[2].json().get('result', {}).get('list', []) if i['symbol'].endswith('USDT') and float(i['lastPrice']) > 0.0001}
 
-                    if can_withdraw:
-                        ask_price = float(info["asks"][0]["price"])
-                        if ask_price > 0:
-                            bithumb_buy_prices[coin] = ask_price
+        if not isinstance(results[3], Exception) and results[3].status_code == 200:
+            foreign_prices['비트겟'] = {i['symbol'].replace('USDT', '').upper(): float(i['lastPr']) for i in results[3].json().get('data', []) if i.get('symbol', '').endswith('USDT') and float(i.get('lastPr', 0)) > 0.0001}
 
-            if "USDT" in bithumb_buy_prices:
-                usdt_krw = bithumb_buy_prices["USDT"]
-        except Exception as e:
-            print("Bithumb API Error:", e)
+        if not isinstance(results[4], Exception) and results[4].status_code == 200:
+            foreign_prices['게이트아이오'] = {i['currency_pair'].replace('_USDT', '').upper(): float(i['last']) for i in results[4].json() if i.get('currency_pair', '').endswith('_USDT') and float(i.get('last', 0)) > 0.0001}
 
-        upbit_sell_prices = {}
-        binance_sell_prices = {}
-        bybit_sell_prices = {}
-        gate_sell_prices = {}
+        # 2. 빗썸/업비트 시세 파싱
+        bithumb_prices = {}
+        usd_krw = 1462.0  # 기본 USDT 기준 환율
+        if not isinstance(results[5], Exception) and results[5].status_code == 200:
+            b_data = results[5].json().get('data', {})
+            for sym, val in b_data.items():
+                if sym != 'date' and isinstance(val, dict):
+                    p = float(val.get('closing_price', 0))
+                    if p > 0.1:
+                        bithumb_prices[sym.upper()] = p
+            if 'USDT' in bithumb_prices:
+                usd_krw = bithumb_prices['USDT']
 
-        # 2. 업비트 호가창 조회
-        try:
-            m_res = await client.get("https://api.upbit.com/v1/market/all?isDetails=false")
-            krw_markets = [item["market"] for item in m_res.json() if item["market"].startswith("KRW-")]
-            
-            for i in range(0, len(krw_markets), 100):
-                chunk = krw_markets[i:i+100]
-                ob_res = await client.get(f"https://api.upbit.com/v1/orderbook?markets={','.join(chunk)}")
-                for item in ob_res.json():
-                    coin = item["market"].split("-")[1]
-                    if item.get("orderbook_units") and len(item["orderbook_units"]) > 0:
-                        bid_price = float(item["orderbook_units"][0]["bid_price"])
-                        if bid_price > 0:
-                            upbit_sell_prices[coin] = bid_price
-        except Exception as e:
-            print("Upbit Error:", e)
+        upbit_prices = {}
+        if not isinstance(results[6], Exception) and results[6].status_code == 200:
+            upbit_prices = {i['market'].replace('KRW-', '').upper(): float(i['trade_price']) for i in results[6].json() if float(i['trade_price']) > 0.1}
 
-        # 3. 바이낸스 최상단 호가 조회
-        try:
-            res = await client.get("https://api.binance.com/api/v3/ticker/bookTicker")
-            for item in res.json():
-                symbol = item["symbol"]
-                bid_price = float(item.get("bidPrice", 0))
-                bid_qty = float(item.get("bidQty", 0))
-                if symbol.endswith("USDT") and bid_price > 0 and bid_qty > 0:
-                    coin = symbol[:-4]
-                    binance_sell_prices[coin] = bid_price * usdt_krw
-        except Exception as e:
-            print("Binance Error:", e)
+        # 3. 빗썸 출금 상태 확인
+        bithumb_withdraw_ok = set()
+        if not isinstance(results[7], Exception) and results[7].status_code == 200:
+            bs_data = results[7].json().get('data', {})
+            for sym, status in bs_data.items():
+                if isinstance(status, dict):
+                    if str(status.get('withdrawal_status', '0')) == '1':
+                        bithumb_withdraw_ok.add(sym.upper())
 
-        # 4. 바이비트 최상단 호가 조회
-        try:
-            res = await client.get("https://api.bybit.com/v5/market/tickers?category=spot")
-            for item in res.json()["result"]["list"]:
-                symbol = item["symbol"]
-                bid_price = float(item.get("bid1Price", 0))
-                bid_size = float(item.get("bid1Size", 0))
-                if symbol.endswith("USDT") and bid_price > 0 and bid_size > 0:
-                    coin = symbol[:-4]
-                    bybit_sell_prices[coin] = bid_price * usdt_krw
-        except Exception as e:
-            print("Bybit Error:", e)
+        high_profit = [] # 1.5% 이상
+        normal_profit = [] # 1.0% ~ 1.5% 미만
 
-        # 5. 게이트아이오 최상단 호가 조회
-        try:
-            res = await client.get("https://api.gateio.ws/api/v4/spot/tickers")
-            for item in res.json():
-                symbol = item["currency_pair"]
-                highest_bid = float(item.get("highest_bid", 0))
-                if symbol.endswith("_USDT") and highest_bid > 0:
-                    coin = symbol.replace("_USDT", "")
-                    gate_sell_prices[coin] = highest_bid * usdt_krw
-        except Exception as e:
-            print("Gate.io Error:", e)
+        def format_krw(price):
+            if price < 1: return f"{price:.5f}원"
+            if price < 10: return f"{price:.2f}원"
+            if price < 100: return f"{price:.2f}원"
+            return f"{price:,.0f}원"
 
-        # 6. 실질 차익 계산 (1.0% 이상만 추출)
-        opportunities = []
+        # 4. 차익 계산 (빗썸 매수 기준)
+        for sym, b_price in bithumb_prices.items():
+            if sym == 'USDT' or sym not in bithumb_withdraw_ok:
+                continue
 
-        for coin, buy_price in bithumb_buy_prices.items():
-            if buy_price <= 0 or coin == "USDT": continue
+            best_sell_ex = ""
+            best_sell_price_krw = 0
+            best_profit = -999.0
 
-            target_exchanges = {}
-            if coin in upbit_sell_prices: target_exchanges["업비트"] = upbit_sell_prices[coin]
-            if coin in binance_sell_prices: target_exchanges["바이낸스"] = binance_sell_prices[coin]
-            if coin in bybit_sell_prices: target_exchanges["바이비트"] = bybit_sell_prices[coin]
-            if coin in gate_sell_prices: target_exchanges["게이트아이오"] = gate_sell_prices[coin]
+            # 업비트 비교
+            if sym in upbit_prices:
+                u_price = upbit_prices[sym]
+                profit = ((u_price - b_price) / b_price) * 100
+                if profit > best_profit:
+                    best_profit = profit
+                    best_sell_ex = "업비트"
+                    best_sell_price_krw = u_price
 
-            if target_exchanges:
-                best_sell_ex = max(target_exchanges, key=target_exchanges.get)
-                best_sell_price = target_exchanges[best_sell_ex]
+            # 해외 거래소 비교
+            for f_name, f_dict in foreign_prices.items():
+                if sym in f_dict:
+                    f_price_krw = f_dict[sym] * usd_krw
+                    profit = ((f_price_krw - b_price) / b_price) * 100
+                    if profit > best_profit:
+                        best_profit = profit
+                        best_sell_ex = f_name
+                        best_sell_price_krw = f_price_krw
 
-                profit_rate = ((best_sell_price - buy_price) / buy_price) * 100
+            # 1.0% ~ 30% 사이 조건
+            if 1.0 <= best_profit <= 30.0:
+                item = {
+                    "symbol": sym,
+                    "bithumb_price": format_krw(b_price),
+                    "sell_ex": best_sell_ex,
+                    "sell_price": format_krw(best_sell_price_krw),
+                    "profit": round(best_profit, 2)
+                }
+                if best_profit >= 1.5:
+                    high_profit.append(item)
+                else:
+                    normal_profit.append(item)
 
-                if 1.0 <= profit_rate <= 25.0:
-                    opportunities.append({
-                        "symbol": coin,
-                        "buy_price": buy_price,
-                        "sell_ex": best_sell_ex,
-                        "sell_price": best_sell_price,
-                        "profit_rate": round(profit_rate, 2)
-                    })
-
-        opportunities.sort(key=lambda x: x["profit_rate"], reverse=True)
+        high_profit.sort(key=lambda x: x["profit"], reverse=True)
+        normal_profit.sort(key=lambda x: x["profit"], reverse=True)
 
         return {
-            "usdt_krw": round(usdt_krw, 2),
-            "opportunities": opportunities
+            "usdt_krw": f"{usd_krw:,.0f}",
+            "high": high_profit,
+            "normal": normal_profit
         }
 
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
     await websocket.accept()
-    while True:
-        try:
-            data = await fetch_prices()
-            await websocket.send_text(json.dumps(data))
-            await asyncio.sleep(2)
-        except Exception as e:
-            print("WS Error:", e)
-            break
+    try:
+        while True:
+            data = await fetch_bithumb_arbitrage()
+            await websocket.send_json(data)
+            await asyncio.sleep(2.0)
+    except WebSocketDisconnect:
+        pass
