@@ -1,158 +1,125 @@
-import asyncio
-import httpx
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
-from fastapi.responses import HTMLResponse
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <title>빗썸 출발 전체 코인 실시간 차익 스캐너</title>
+    <style>
+        body { background-color: #121212; color: #ffffff; font-family: 'Pretendard', sans-serif; margin: 0; padding: 20px; }
+        .header { text-align: center; margin-bottom: 20px; }
+        .header h1 { color: #f39c12; margin: 0 0 8px 0; font-size: 1.8rem; }
+        .sub-info { color: #888; font-size: 0.85rem; }
+        .status-badge { display: inline-block; padding: 2px 8px; border-radius: 12px; font-size: 0.75rem; font-weight: bold; margin-left: 8px; }
+        .status-online { background-color: #2ecc71; color: #000; }
+        .status-offline { background-color: #e74c3c; color: #fff; }
+        .grid-container { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+        .card { background-color: #1a1a1a; border-radius: 10px; padding: 15px; border: 1px solid #2d2d2d; }
+        .card-header { font-size: 1.05rem; font-weight: bold; padding-bottom: 10px; border-bottom: 1px solid #333; display: flex; justify-content: space-between; margin-bottom: 10px; }
+        .high-title { color: #ff9f43; }
+        .normal-title { color: #2ecc71; }
+        .table-container { max-height: 78vh; overflow-y: auto; }
+        table { width: 100%; border-collapse: collapse; text-align: left; font-size: 0.85rem; }
+        th { position: sticky; top: 0; background-color: #222; padding: 8px; color: #aaa; font-weight: normal; font-size: 0.8rem; }
+        td { padding: 8px; border-bottom: 1px solid #262626; }
+        .badge { padding: 2px 5px; border-radius: 3px; font-size: 0.72rem; font-weight: bold; background-color: #2b3a4a; color: #70a1ff; }
+        .profit-high { color: #ff9f43; font-weight: bold; font-size: 0.95rem; }
+        .profit-normal { color: #2ecc71; font-weight: bold; font-size: 0.95rem; }
+    </style>
+</head>
+<body>
 
-app = FastAPI()
+    <div class="header">
+        <h1>🚀 빗썸 출발 전체 코인 차익 스캐너 <span id="conn-status" class="status-badge status-offline">연결 중...</span></h1>
+        <div class="sub-info">기준 USDT 가격 (빗썸): <span id="usdt-rate" style="color:#f1c40f; font-weight:bold;">-</span> KRW | 필터: 빗썸 출금 가능 & 1.0% 이상</div>
+    </div>
 
-@app.get("/")
-async def get():
-    with open("index.html", "r", encoding="utf-8") as f:
-        html_content = f.read()
-    return HTMLResponse(content=html_content)
+    <div class="grid-container">
+        <!-- 1. 고수익 구간 (1.5% 이상) -->
+        <div class="card">
+            <div class="card-header high-title">
+                <span>🔥 고수익 구간 (1.5% 이상)</span>
+                <span id="high-count">0개</span>
+            </div>
+            <div class="table-container">
+                <table>
+                    <thead>
+                        <tr><th>코인</th><th>빗썸 (매수 1호가)</th><th>최고가 매도처</th><th>기대 수익률</th></tr>
+                    </thead>
+                    <tbody id="high-list"></tbody>
+                </table>
+            </div>
+        </div>
 
-async def fetch_bithumb_arbitrage():
-    # 해외 서버(Render) 차단 방지용 브라우저 헤더
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
-        "Accept": "application/json, text/plain, */*",
-        "Accept-Language": "ko-KR,ko;q=0.9,en-US;q=0.8,en;q=0.7"
-    }
+        <!-- 2. 일반 구간 (1.0% ~ 1.5% 미만) -->
+        <div class="card">
+            <div class="card-header normal-title">
+                <span>⚡ 일반 구간 (1.0% ~ 1.5% 미만)</span>
+                <span id="normal-count">0개</span>
+            </div>
+            <div class="table-container">
+                <table>
+                    <thead>
+                        <tr><th>코인</th><th>빗썸 (매수 1호가)</th><th>최고가 매도처</th><th>기대 수익률</th></tr>
+                    </thead>
+                    <tbody id="normal-list"></tbody>
+                </table>
+            </div>
+        </div>
+    </div>
 
-    async with httpx.AsyncClient(timeout=10.0, headers=headers, follow_redirects=True) as client:
-        tasks = [
-            client.get("https://api.binance.com/api/v3/ticker/price"),
-            client.get("https://www.okx.com/api/v5/market/tickers?instType=SPOT"),
-            client.get("https://api.bybit.com/v5/market/tickers?category=spot"),
-            client.get("https://api.bitget.com/api/v2/spot/market/tickers"),
-            client.get("https://api.gateio.ws/api/v4/spot/tickers"),
-            client.get("https://api.bithumb.com/public/ticker/ALL_KRW"),
-            client.get("https://api.upbit.com/v1/ticker/all?quote_currencies=KRW"),
-            client.get("https://api.bithumb.com/public/assets_status/ALL")
-        ]
-        
-        results = await asyncio.gather(*tasks, return_exceptions=True)
-        
-        # 1. 해외 거래소 가격 파싱 ($)
-        foreign_prices = {}
-        if not isinstance(results[0], Exception) and results[0].status_code == 200:
-            foreign_prices['바이낸스'] = {i['symbol'].replace('USDT', '').upper(): float(i['price']) for i in results[0].json() if i['symbol'].endswith('USDT') and float(i['price']) > 0.0001}
+    <script>
+        let socket;
 
-        if not isinstance(results[1], Exception) and results[1].status_code == 200:
-            foreign_prices['OKX'] = {i['instId'].replace('-USDT', '').upper(): float(i['last']) for i in results[1].json().get('data', []) if i['instId'].endswith('-USDT') and float(i['last']) > 0.0001}
+        function connectWebSocket() {
+            const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+            socket = new WebSocket(`${wsProtocol}//${window.location.host}/ws`);
 
-        if not isinstance(results[2], Exception) and results[2].status_code == 200:
-            foreign_prices['바이비트'] = {i['symbol'].replace('USDT', '').upper(): float(i['lastPrice']) for i in results[2].json().get('result', {}).get('list', []) if i['symbol'].endswith('USDT') and float(i['lastPrice']) > 0.0001}
+            const statusBadge = document.getElementById('conn-status');
 
-        if not isinstance(results[3], Exception) and results[3].status_code == 200:
-            foreign_prices['비트겟'] = {i['symbol'].replace('USDT', '').upper(): float(i['lastPr']) for i in results[3].json().get('data', []) if i.get('symbol', '').endswith('USDT') and float(i.get('lastPr', 0)) > 0.0001}
+            socket.onopen = function() {
+                statusBadge.innerText = '실시간 연결됨';
+                statusBadge.className = 'status-badge status-online';
+            };
 
-        if not isinstance(results[4], Exception) and results[4].status_code == 200:
-            foreign_prices['게이트아이오'] = {i['currency_pair'].replace('_USDT', '').upper(): float(i['last']) for i in results[4].json() if i.get('currency_pair', '').endswith('_USDT') and float(i.get('last', 0)) > 0.0001}
+            socket.onmessage = function(event) {
+                const data = JSON.parse(event.data);
+                document.getElementById('usdt-rate').innerText = `${data.usdt_krw}`;
+                renderRows(data.high, 'high-list', 'high-count', true);
+                renderRows(data.normal, 'normal-list', 'normal-count', false);
+            };
 
-        # 2. 빗썸/업비트 시세 파싱
-        bithumb_prices = {}
-        usd_krw = 1462.0
-        
-        if not isinstance(results[5], Exception) and results[5].status_code == 200:
-            try:
-                b_data = results[5].json().get('data', {})
-                for sym, val in b_data.items():
-                    if sym != 'date' and isinstance(val, dict):
-                        p = float(val.get('closing_price', 0))
-                        if p > 0.1:
-                            bithumb_prices[sym.upper()] = p
-                if 'USDT' in bithumb_prices:
-                    usd_krw = bithumb_prices['USDT']
-            except Exception:
-                pass
+            socket.onclose = function() {
+                statusBadge.innerText = '재연결 시도 중...';
+                statusBadge.className = 'status-badge status-offline';
+                // 연결이 끊기면 1초 후 자동 재연결
+                setTimeout(connectWebSocket, 1000);
+            };
 
-        upbit_prices = {}
-        if not isinstance(results[6], Exception) and results[6].status_code == 200:
-            try:
-                upbit_prices = {i['market'].replace('KRW-', '').upper(): float(i['trade_price']) for i in results[6].json() if float(i['trade_price']) > 0.1}
-            except Exception:
-                pass
-
-        # 3. 빗썸 출금 상태 파싱 (지갑 API 실패 시 전체 허용으로 안전 처리)
-        bithumb_withdraw_block = set()
-        if not isinstance(results[7], Exception) and results[7].status_code == 200:
-            try:
-                bs_data = results[7].json().get('data', {})
-                for sym, status in bs_data.items():
-                    if isinstance(status, dict):
-                        w_status = str(status.get('withdrawal_status', '1'))
-                        if w_status == '0':
-                            bithumb_withdraw_block.add(sym.upper())
-            except Exception:
-                pass
-
-        high_profit = []
-        normal_profit = []
-
-        def format_krw(price):
-            if price < 1: return f"{price:.5f}원"
-            if price < 10: return f"{price:.2f}원"
-            if price < 100: return f"{price:.2f}원"
-            return f"{price:,.0f}원"
-
-        # 4. 차익 계산
-        for sym, b_price in bithumb_prices.items():
-            if sym == 'USDT' or sym in bithumb_withdraw_block:
-                continue
-
-            best_sell_ex = ""
-            best_sell_price_krw = 0
-            best_profit = -999.0
-
-            # 업비트 비교
-            if sym in upbit_prices:
-                u_price = upbit_prices[sym]
-                profit = ((u_price - b_price) / b_price) * 100
-                if profit > best_profit:
-                    best_profit = profit
-                    best_sell_ex = "업비트"
-                    best_sell_price_krw = u_price
-
-            # 해외 거래소 비교
-            for f_name, f_dict in foreign_prices.items():
-                if sym in f_dict:
-                    f_price_krw = f_dict[sym] * usd_krw
-                    profit = ((f_price_krw - b_price) / b_price) * 100
-                    if profit > best_profit:
-                        best_profit = profit
-                        best_sell_ex = f_name
-                        best_sell_price_krw = f_price_krw
-
-            if 1.0 <= best_profit <= 30.0:
-                item = {
-                    "symbol": sym,
-                    "bithumb_price": format_krw(b_price),
-                    "sell_ex": best_sell_ex,
-                    "sell_price": format_krw(best_sell_price_krw),
-                    "profit": round(best_profit, 2)
-                }
-                if best_profit >= 1.5:
-                    high_profit.append(item)
-                else:
-                    normal_profit.append(item)
-
-        high_profit.sort(key=lambda x: x["profit"], reverse=True)
-        normal_profit.sort(key=lambda x: x["profit"], reverse=True)
-
-        return {
-            "usdt_krw": f"{usd_krw:,.0f}",
-            "high": high_profit,
-            "normal": normal_profit
+            socket.onerror = function() {
+                socket.close();
+            };
         }
 
-@app.websocket("/ws")
-async def websocket_endpoint(websocket: WebSocket):
-    await websocket.accept()
-    try:
-        while True:
-            data = await fetch_bithumb_arbitrage()
-            await websocket.send_json(data)
-            await asyncio.sleep(2.0)
-    except WebSocketDisconnect:
-        pass
+        function renderRows(list, targetId, countId, isHigh) {
+            const tbody = document.getElementById(targetId);
+            document.getElementById(countId).innerText = `${list.length}개`;
+            
+            if (list.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="4" style="text-align:center; color:#555;">해당 구간 코인 없음</td></tr>';
+                return;
+            }
+
+            tbody.innerHTML = list.map(item => `
+                <tr>
+                    <td><strong>${item.symbol}</strong></td>
+                    <td>${item.bithumb_price}</td>
+                    <td><span class="badge">${item.sell_ex}</span><br><small style="color:#aaa;">${item.sell_price}</small></td>
+                    <td class="${isHigh ? 'profit-high' : 'profit-normal'}">+${item.profit}%</td>
+                </tr>
+            `).join('');
+        }
+
+        // 웹소켓 연결 실행
+        connectWebSocket();
+    </script>
+</body>
+</html>
