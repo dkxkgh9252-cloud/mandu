@@ -65,8 +65,7 @@
                 let prices = {};
                 data.forEach(i => {
                     if (i.symbol.endsWith('USDT')) {
-                        const sym = i.symbol.replace('USDT', '');
-                        prices[sym] = parseFloat(i.price);
+                        prices[i.symbol.replace('USDT', '').toUpperCase()] = parseFloat(i.price);
                     }
                 });
                 return prices;
@@ -81,12 +80,17 @@
                 const list = data.result?.list || [];
                 list.forEach(i => {
                     if (i.symbol.endsWith('USDT')) {
-                        const sym = i.symbol.replace('USDT', '');
-                        prices[sym] = parseFloat(i.lastPrice);
+                        prices[i.symbol.replace('USDT', '').toUpperCase()] = parseFloat(i.lastPrice);
                     }
                 });
                 return prices;
             } catch(e) { return {}; }
+        }
+
+        function formatKrw(price) {
+            if (price < 1) return `${price.toFixed(5)}원`;
+            if (price < 100) return `${price.toFixed(2)}원`;
+            return `${Math.round(price).toLocaleString()}원`;
         }
 
         function connectWebSocket() {
@@ -100,28 +104,64 @@
             };
 
             socket.onmessage = async function(event) {
-                const data = JSON.parse(event.data);
-                document.getElementById('usdt-rate').innerText = data.usdt_krw;
-                const usdKrwNum = parseFloat(data.usdt_krw.replace(/,/g, ''));
+                const serverData = JSON.parse(event.data);
+                const usdKrw = parseFloat(serverData.usdt_krw.replace(/,/g, ''));
+                document.getElementById('usdt-rate').innerText = serverData.usdt_krw;
 
-                // 브라우저에서 직접 바이낸스, 바이비트 시세 조회 (차단 우회)
+                // 브라우저에서 직접 바이낸스와 바이비트 시세 가져오기 (차단 우회 성공)
                 const [binancePrices, bybitPrices] = await Promise.all([fetchBinance(), fetchBybit()]);
 
                 let grouped = {};
                 exchanges.forEach(ex => grouped[ex] = []);
 
-                // 서버에서 온 데이터(비트겟, 업비트 등) 활용 및 전체 매칭 재계산
-                // 서버 high 리스트를 바탕으로 각 거래소별 분류
-                const allItems = data.high || [];
-
-                // 바이낸스, 바이비트 데이터를 직접 클라이언트에서 조합해서 추가
-                // (기존 서버 데이터 외에 브라우저가 수집한 바이낸스/바이비트 비교군 반영)
-                // 편의를 위해 서버 데이터를 각 거래소 매핑에 맞게 분배
-                allItems.forEach(item => {
+                // 1. 서버에서 온 데이터(비트겟, 업비트) 분류
+                const serverItems = serverData.high || [];
+                serverItems.forEach(item => {
                     if (grouped[item.sell_ex]) {
                         grouped[item.sell_ex].push(item);
                     }
                 });
+
+                // 2. 서버 데이터 중 빗썸가 정보 매핑을 위해 빗썸가 원본 추출 필요하므로 
+                // 임시로 서버 데이터에서 심볼별 빗썸 가격 매핑 생성
+                let bithumbPricesMap = {};
+                serverItems.forEach(item => {
+                    bithumbPricesMap[item.symbol] = parseFloat(item.bithumb_price.replace(/[^0-9.]/g, ''));
+                });
+
+                // 바이낸스 데이터 계산 추가
+                for (const [sym, fPrice] of Object.entries(binancePrices)) {
+                    if (bithumbPricesMap[sym]) {
+                        const bPrice = bithumbPricesMap[sym];
+                        const fPriceKrw = fPrice * usdKrw;
+                        const profit = ((fPriceKrw - bPrice) / bPrice) * 100;
+                        if (profit >= 1.0 && profit <= 50.0) {
+                            grouped['바이낸스'].push({
+                                symbol: sym,
+                                bithumb_price: formatKrw(bPrice),
+                                sell_price: formatKrw(fPriceKrw),
+                                profit: Math.round(profit * 100) / 100
+                            });
+                        }
+                    }
+                }
+
+                // 바이비트 데이터 계산 추가
+                for (const [sym, fPrice] of Object.entries(bybitPrices)) {
+                    if (bithumbPricesMap[sym]) {
+                        const bPrice = bithumbPricesMap[sym];
+                        const fPriceKrw = fPrice * usdKrw;
+                        const profit = ((fPriceKrw - bPrice) / bPrice) * 100;
+                        if (profit >= 1.0 && profit <= 50.0) {
+                            grouped['바이비트'].push({
+                                symbol: sym,
+                                bithumb_price: formatKrw(bPrice),
+                                sell_price: formatKrw(fPriceKrw),
+                                profit: Math.round(profit * 100) / 100
+                            });
+                        }
+                    }
+                }
 
                 exchanges.forEach(ex => {
                     renderRows(grouped[ex], `list-${ex}`, `count-${ex}`);
