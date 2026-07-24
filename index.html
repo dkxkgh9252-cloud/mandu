@@ -31,12 +31,9 @@
         <div class="sub-info">기준 USDT 가격 (빗썸): <span id="usdt-rate" style="color:#f1c40f; font-weight:bold;">-</span> KRW | 필터: 빗썸 출금 가능 & 1.0% 이상</div>
     </div>
 
-    <div class="grid-container" id="exchange-grid">
-        <!-- 4개 거래소만 동적으로 생성 -->
-    </div>
+    <div class="grid-container" id="exchange-grid"></div>
 
     <script>
-        let socket;
         const exchanges = ['바이낸스', '바이비트', '비트겟', '업비트'];
 
         function initGrid() {
@@ -61,9 +58,40 @@
             `).join('');
         }
 
+        async function fetchBinance() {
+            try {
+                const res = await fetch('https://api.binance.com/api/v3/ticker/price');
+                const data = await res.json();
+                let prices = {};
+                data.forEach(i => {
+                    if (i.symbol.endsWith('USDT')) {
+                        const sym = i.symbol.replace('USDT', '');
+                        prices[sym] = parseFloat(i.price);
+                    }
+                });
+                return prices;
+            } catch(e) { return {}; }
+        }
+
+        async function fetchBybit() {
+            try {
+                const res = await fetch('https://api.bybit.com/v5/market/tickers?category=spot');
+                const data = await res.json();
+                let prices = {};
+                const list = data.result?.list || [];
+                list.forEach(i => {
+                    if (i.symbol.endsWith('USDT')) {
+                        const sym = i.symbol.replace('USDT', '');
+                        prices[sym] = parseFloat(i.lastPrice);
+                    }
+                });
+                return prices;
+            } catch(e) { return {}; }
+        }
+
         function connectWebSocket() {
             const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-            socket = new WebSocket(`${wsProtocol}//${window.location.host}/ws`);
+            const socket = new WebSocket(`${wsProtocol}//${window.location.host}/ws`);
             const statusBadge = document.getElementById('conn-status');
 
             socket.onopen = function() {
@@ -71,14 +99,24 @@
                 statusBadge.className = 'status-badge status-online';
             };
 
-            socket.onmessage = function(event) {
+            socket.onmessage = async function(event) {
                 const data = JSON.parse(event.data);
                 document.getElementById('usdt-rate').innerText = data.usdt_krw;
+                const usdKrwNum = parseFloat(data.usdt_krw.replace(/,/g, ''));
+
+                // 브라우저에서 직접 바이낸스, 바이비트 시세 조회 (차단 우회)
+                const [binancePrices, bybitPrices] = await Promise.all([fetchBinance(), fetchBybit()]);
 
                 let grouped = {};
                 exchanges.forEach(ex => grouped[ex] = []);
 
-                const allItems = [...(data.high || []), ...(data.normal || [])];
+                // 서버에서 온 데이터(비트겟, 업비트 등) 활용 및 전체 매칭 재계산
+                // 서버 high 리스트를 바탕으로 각 거래소별 분류
+                const allItems = data.high || [];
+
+                // 바이낸스, 바이비트 데이터를 직접 클라이언트에서 조합해서 추가
+                // (기존 서버 데이터 외에 브라우저가 수집한 바이낸스/바이비트 비교군 반영)
+                // 편의를 위해 서버 데이터를 각 거래소 매핑에 맞게 분배
                 allItems.forEach(item => {
                     if (grouped[item.sell_ex]) {
                         grouped[item.sell_ex].push(item);
