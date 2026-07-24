@@ -11,66 +11,161 @@ async def get():
         html_content = f.read()
     return HTMLResponse(content=html_content)
 
-async def get_arbitrage_data():
+async def fetch_all_exchanges():
     """
-    1% 이상 조건에 맞으면 개수 제한 없이 전부 리스트에 담아 리턴합니다.
-    (수익률 높은 순 내림차순 정렬)
+    모든 거래소(바이낸스, OKX, 바이비트, 비트겟, 게이트아이오, 빗썸, 업비트)의 시세를 
+    비동기로 동시에 수집한 뒤 3가지 조건(해외↔해외, 국내←해외, 빗썸➔해외)을 계산합니다.
     """
-    global_list = [
-        {"symbol": "APT", "buy_ex": "Bybit", "buy_price": "$8.20", "sell_ex": "OKX", "sell_price": "$8.45", "profit": 3.04},
-        {"symbol": "SUI", "buy_ex": "OKX", "buy_price": "$1.80", "sell_ex": "Bybit", "sell_price": "$1.85", "profit": 2.77},
-        {"symbol": "NEAR", "buy_ex": "Binance", "buy_price": "$4.50", "sell_ex": "Bitget", "sell_price": "$4.62", "profit": 2.66},
-        {"symbol": "PEPE", "buy_ex": "Binance", "buy_price": "$0.008", "sell_ex": "Gate.io", "sell_price": "$0.0082", "profit": 2.50},
-        {"symbol": "SOL", "buy_ex": "Bybit", "buy_price": "$140", "sell_ex": "OKX", "sell_price": "$142.5", "profit": 1.78},
-        {"symbol": "AVAX", "buy_ex": "OKX", "buy_price": "$25", "sell_ex": "Bybit", "sell_price": "$25.4", "profit": 1.60},
-        {"symbol": "BTC", "buy_ex": "Binance", "buy_price": "$65,000", "sell_ex": "OKX", "sell_price": "$65,800", "profit": 1.23},
-        {"symbol": "TIA", "buy_ex": "Binance", "buy_price": "$5.10", "sell_ex": "OKX", "sell_price": "$5.16", "profit": 1.18},
-        {"symbol": "INJ", "buy_ex": "Bybit", "buy_price": "$18.5", "sell_ex": "OKX", "sell_price": "$18.7", "profit": 1.08},
-        {"symbol": "RENDER", "buy_ex": "Binance", "buy_price": "$6.20", "sell_ex": "Bitget", "sell_price": "$6.26", "profit": 1.02},
-    ]
-    
-    inbound_list = [
-        {"symbol": "AVA", "buy_ex": "Bybit", "buy_price": "2,100원", "sell_ex": "Bithumb", "sell_price": "2,180원", "profit": 3.81},
-        {"symbol": "SAND", "buy_ex": "Bybit", "buy_price": "420원", "sell_ex": "Upbit", "sell_price": "435원", "profit": 3.57},
-        {"symbol": "MATIC", "buy_ex": "Binance", "buy_price": "600원", "sell_ex": "Bithumb", "sell_price": "615원", "profit": 2.50},
-        {"symbol": "LINK", "buy_ex": "OKX", "buy_price": "18,000원", "sell_ex": "Upbit", "sell_price": "18,400원", "profit": 2.22},
-        {"symbol": "XLM", "buy_ex": "Bybit", "buy_price": "130원", "sell_ex": "Upbit", "sell_price": "132원", "profit": 1.53},
-        {"symbol": "ETH", "buy_ex": "Binance", "buy_price": "3,400,000원", "sell_ex": "Upbit", "sell_price": "3,450,000원", "profit": 1.47},
-        {"symbol": "ALGO", "buy_ex": "Bybit", "buy_price": "180원", "sell_ex": "Upbit", "sell_price": "182.5원", "profit": 1.39},
-        {"symbol": "STX", "buy_ex": "Binance", "buy_price": "2,100원", "sell_ex": "Bithumb", "sell_price": "2,125원", "profit": 1.19},
-        {"symbol": "FLOW", "buy_ex": "OKX", "buy_price": "750원", "sell_ex": "Upbit", "sell_price": "758원", "profit": 1.07},
-    ]
-    
-    bithumb_list = [
-        {"symbol": "BONK", "buy_ex": "빗썸", "buy_price": "0.035원", "sell_ex": "OKX", "sell_price": "0.037원", "profit": 5.71},
-        {"symbol": "SHIB", "buy_ex": "빗썸", "buy_price": "0.024원", "sell_ex": "OKX", "sell_price": "0.025원", "profit": 4.16},
-        {"symbol": "XRP", "buy_ex": "빗썸", "buy_price": "850원", "sell_ex": "Binance", "sell_price": "880원", "profit": 3.52},
-        {"symbol": "WIF", "buy_ex": "빗썸", "buy_price": "2,200원", "sell_ex": "Binance", "sell_price": "2,270원", "profit": 3.18},
-        {"symbol": "SEI", "buy_ex": "빗썸", "buy_price": "450원", "sell_ex": "Bybit", "sell_price": "462원", "profit": 2.66},
-        {"symbol": "DOGE", "buy_ex": "빗썸", "buy_price": "180원", "sell_ex": "Bybit", "sell_price": "183원", "profit": 1.66},
-        {"symbol": "ADA", "buy_ex": "빗썸", "buy_price": "500원", "sell_ex": "Binance", "sell_price": "506원", "profit": 1.20},
-        {"symbol": "EOS", "buy_ex": "빗썸", "buy_price": "780원", "sell_ex": "Bybit", "sell_price": "789원", "profit": 1.15},
-        {"symbol": "TRX", "buy_ex": "빗썸", "buy_price": "170원", "sell_ex": "OKX", "sell_price": "171.8원", "profit": 1.06},
-        {"symbol": "GALA", "buy_ex": "빗썸", "buy_price": "28원", "sell_ex": "Binance", "sell_price": "28.3원", "profit": 1.07},
-    ]
+    usd_krw = 1380.0  # 기본 적용 환율
 
-    # 수익률 1.0% 이상인 것 전부 필터링 및 높은 순 정렬
-    filter_and_sort = lambda lst: sorted([i for i in lst if i["profit"] >= 1.0], key=lambda x: x["profit"], reverse=True)
+    async with httpx.AsyncClient(timeout=6.0) as client:
+        # 1. 모든 거래소 API 동시 요청
+        tasks = [
+            client.get("https://api.binance.com/api/v3/ticker/price"),               # 바이낸스
+            client.get("https://www.okx.com/api/v5/market/tickers?instType=SPOT"),   # OKX
+            client.get("https://api.bybit.com/v5/market/tickers?category=spot"),     # 바이비트
+            client.get("https://api.bitget.com/api/v2/spot/market/tickers"),         # 비트겟
+            client.get("https://api.gateio.ws/api/v4/spot/tickers"),                 # 게이트아이오
+            client.get("https://api.bithumb.com/public/ticker/ALL_KRW"),             # 빗썸
+            client.get("https://api.upbit.com/v1/ticker/all?quote_currencies=KRW")  # 업비트
+        ]
+        
+        results = await asyncio.gather(*tasks, return_exceptions=True)
 
-    return {
-        "global": filter_and_sort(global_list),
-        "inbound": filter_and_sort(inbound_list),
-        "bithumb": filter_and_sort(bithumb_list)
-    }
+        # 2. 거래소별 데이터 파싱 저장소
+        ex_prices = {} # ex_prices['Binance']['BTC'] = 65000.0
+
+        # --- 바이낸스 파싱 ---
+        if not isinstance(results[0], Exception) and results[0].status_code == 200:
+            ex_prices['Binance'] = {}
+            for item in results[0].json():
+                if item['symbol'].endswith('USDT'):
+                    sym = item['symbol'].replace('USDT', '')
+                    ex_prices['Binance'][sym] = float(item['price'])
+
+        # --- OKX 파싱 ---
+        if not isinstance(results[1], Exception) and results[1].status_code == 200:
+            ex_prices['OKX'] = {}
+            for item in results[1].json().get('data', []):
+                if item['instId'].endswith('-USDT'):
+                    sym = item['instId'].replace('-USDT', '')
+                    ex_prices['OKX'][sym] = float(item['last'])
+
+        # --- 바이비트 파싱 ---
+        if not isinstance(results[2], Exception) and results[2].status_code == 200:
+            ex_prices['Bybit'] = {}
+            for item in results[2].json().get('result', {}).get('list', []):
+                if item['symbol'].endswith('USDT'):
+                    sym = item['symbol'].replace('USDT', '')
+                    ex_prices['Bybit'][sym] = float(item['lastPrice'])
+
+        # --- 비트겟 파싱 ---
+        if not isinstance(results[3], Exception) and results[3].status_code == 200:
+            ex_prices['Bitget'] = {}
+            for item in results[3].json().get('data', []):
+                if item.get('symbol', '').endswith('USDT'):
+                    sym = item['symbol'].replace('USDT', '')
+                    ex_prices['Bitget'][sym] = float(item['lastPr'])
+
+        # --- 게이트아이오 파싱 ---
+        if not isinstance(results[4], Exception) and results[4].status_code == 200:
+            ex_prices['Gate.io'] = {}
+            for item in results[4].json():
+                if item.get('currency_pair', '').endswith('_USDT'):
+                    sym = item['currency_pair'].replace('_USDT', '')
+                    ex_prices['Gate.io'][sym] = float(item['last'])
+
+        # --- 빗썸 파싱 ---
+        bithumb_prices = {}
+        if not isinstance(results[5], Exception) and results[5].status_code == 200:
+            b_data = results[5].json().get('data', {})
+            for sym, val in b_data.items():
+                if sym != 'date' and isinstance(val, dict):
+                    bithumb_prices[sym] = float(val.get('closing_price', 0))
+
+        # --- 업비트 파싱 ---
+        upbit_prices = {}
+        if not isinstance(results[6], Exception) and results[6].status_code == 200:
+            for item in results[6].json():
+                sym = item['market'].replace('KRW-', '')
+                upbit_prices[sym] = float(item['trade_price'])
+
+        global_list = []  # 해외 ↔ 해외
+        inbound_list = [] # 국내 ← 해외 (업비트/빗썸)
+        bithumb_list = [] # 빗썸 ➔ 해외
+
+        foreign_exchanges = ['Binance', 'OKX', 'Bybit', 'Bitget', 'Gate.io']
+
+        # 3. 차익 무제한 산출 로직
+        # [1] 해외 ↔ 해외 차익
+        for i in range(len(foreign_exchanges)):
+            for j in range(len(foreign_exchanges)):
+                if i == j: continue
+                ex1, ex2 = foreign_exchanges[i], foreign_exchanges[j]
+                if ex1 in ex_prices and ex2 in ex_prices:
+                    for sym, p1 in ex_prices[ex1].items():
+                        if sym in ex_prices[ex2] and p1 > 0:
+                            p2 = ex_prices[ex2][sym]
+                            profit = ((p2 - p1) / p1) * 100
+                            if profit >= 1.0:
+                                global_list.append({
+                                    "symbol": sym,
+                                    "buy_ex": ex1, "buy_price": f"${p1:,.4f}",
+                                    "sell_ex": ex2, "sell_price": f"${p2:,.4f}",
+                                    "profit": round(profit, 2)
+                                })
+
+        # [2] 국내(업비트/빗썸) ← 해외 차익
+        domestics = [('Upbit', upbit_prices), ('Bithumb', bithumb_prices)]
+        for dom_name, dom_dict in domestics:
+            for f_ex in foreign_exchanges:
+                if f_ex in ex_prices:
+                    for sym, f_price in ex_prices[f_ex].items():
+                        if sym in dom_dict and f_price > 0:
+                            f_krw = f_price * usd_krw
+                            d_price = dom_dict[sym]
+                            profit = ((d_price - f_krw) / f_krw) * 100
+                            if profit >= 1.0:
+                                inbound_list.append({
+                                    "symbol": sym,
+                                    "buy_ex": f_ex, "buy_price": f"${f_price:,.4f}",
+                                    "sell_ex": dom_name, "sell_price": f"{d_price:,.1f}원",
+                                    "profit": round(profit, 2)
+                                })
+
+        # [3] 빗썸 ➔ 해외 차익
+        for f_ex in foreign_exchanges:
+            if f_ex in ex_prices:
+                for sym, b_price in bithumb_prices.items():
+                    if sym in ex_prices[f_ex] and b_price > 0:
+                        f_price = ex_prices[f_ex][sym]
+                        f_krw = f_price * usd_krw
+                        profit = ((f_krw - b_price) / b_price) * 100
+                        if profit >= 1.0:
+                            bithumb_list.append({
+                                "symbol": sym,
+                                "buy_ex": "빗썸", "buy_price": f"{b_price:,.1f}원",
+                                "sell_ex": f_ex, "sell_price": f"${f_price:,.4f}",
+                                "profit": round(profit, 2)
+                            })
+
+        # 수익률 높은 순 정렬 (개수 제한 없이 전부 리턴)
+        sort_fn = lambda lst: sorted(lst, key=lambda x: x["profit"], reverse=True)
+
+        return {
+            "global": sort_fn(global_list),
+            "inbound": sort_fn(inbound_list),
+            "bithumb": sort_fn(bithumb_list)
+        }
 
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
     await websocket.accept()
     try:
         while True:
-            data = await get_arbitrage_data()
+            data = await fetch_all_exchanges()
             await websocket.send_json(data)
-            await asyncio.sleep(1.5)
+            await asyncio.sleep(2.0)
     except WebSocketDisconnect:
         print("클라이언트 연결 종료")
     except Exception as e:
